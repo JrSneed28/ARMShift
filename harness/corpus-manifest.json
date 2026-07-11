@@ -1,0 +1,63 @@
+{
+  "schema": "gae-diff/corpus-manifest@1",
+  "record": "W0.4 independent differential harness — architecture-test corpus manifest",
+  "engine_internal_name": "generic-arm64-engine",
+  "work_item": "W0.4",
+  "version": 1,
+  "arch": "aarch64",
+  "note": [
+    "Bounded ARM64 architecture-test corpus for the W0.4 independent differential harness.",
+    "Each test is a fixed, deterministic aarch64 instruction sequence with fixed register inputs",
+    "and a single canonical output line. The corpus is executed TWO ways: (a) under the W0.2 pinned",
+    "qemu-system-aarch64 build (the system-under-test, SUT), and (b) on physical or cloud ARM64",
+    "hardware (the semantic reference). The reference RUN is the oracle. 'arch_expected' below is a",
+    "human-review convenience documenting the architecturally-defined result; it is NOT the oracle and",
+    "the diff engine (diff_corpus.py) never uses it to decide the acceptance verdict. Comparing a",
+    "translator against its own architectural definition proves nothing about translation semantics —",
+    "the reference must be independently produced on real ARM64 silicon (plan §3 W0.4; DoD #4).",
+    "Scope: Stage-A-0 needs a WORKING, BOUNDED harness, not full conformance. The required integer /",
+    "branch-exception / FP-SIMD / atomics-exclusives / system-register matrix is Stage A WA.2, not here."
+  ],
+  "canonical_output_format": {
+    "reg_only": "0x%016x",
+    "reg_with_flags": "0x%016x nzcv=0x%x",
+    "nzcv_encoding": "4-bit value (N<<3)|(Z<<2)|(C<<1)|V, printed as one hex nibble"
+  },
+  "seed_policy": {
+    "description": [
+      "Exactly one entry is the negative control (seed_mismatch=true). When the SUT runner is invoked",
+      "in seed mode (seed_active=true in the SUT result set), it injects one documented, localized",
+      "single-bit mutation into that entry's output ONLY. The reference set is never mutated. A correct",
+      "harness therefore reports: all real tests match (good corpus passes) AND the seed entry mismatches",
+      "(seeded mismatch detected). A harness that fails to flag the seed has not been shown capable of",
+      "rejecting a real semantic divergence and is INVALID (plan §3 W0.4 'Notes and constraints')."
+    ],
+    "mutation": "flip bit 0 of the seed entry's 64-bit result on the SUT side only"
+  },
+  "tests": [
+    { "id": "add_basic",     "class": "integer-arith", "asm": "mov x1,#1; mov x2,#2; add x0,x1,x2",                       "inputs": { "x1": "0x1", "x2": "0x2" },                              "output_kind": "reg_only",       "arch_expected": "0x0000000000000003" },
+    { "id": "add_wrap",      "class": "integer-arith", "asm": "mov x1,#-1; mov x2,#1; add x0,x1,x2",                      "inputs": { "x1": "0xffffffffffffffff", "x2": "0x1" },              "output_kind": "reg_only",       "arch_expected": "0x0000000000000000" },
+    { "id": "sub_neg",       "class": "integer-arith", "asm": "mov x1,#5; mov x2,#9; sub x0,x1,x2",                       "inputs": { "x1": "0x5", "x2": "0x9" },                             "output_kind": "reg_only",       "arch_expected": "0xfffffffffffffffc" },
+    { "id": "mul_low",       "class": "integer-mul",   "asm": "mov x1,#0x100000000; mov x2,#0x100000000; mul x0,x1,x2",   "inputs": { "x1": "0x100000000", "x2": "0x100000000" },             "output_kind": "reg_only",       "arch_expected": "0x0000000000000000" },
+    { "id": "umulh_high",    "class": "integer-mul",   "asm": "mov x1,#0x100000000; mov x2,#0x100000000; umulh x0,x1,x2", "inputs": { "x1": "0x100000000", "x2": "0x100000000" },             "output_kind": "reg_only",       "arch_expected": "0x0000000000000001" },
+    { "id": "and_op",        "class": "logical",       "asm": "and x0,x1,x2",                                             "inputs": { "x1": "0xf0f0f0f0f0f0f0f0", "x2": "0x0ff00ff00ff00ff0" }, "output_kind": "reg_only",      "arch_expected": "0x00f000f000f000f0" },
+    { "id": "orr_op",        "class": "logical",       "asm": "orr x0,x1,x2",                                             "inputs": { "x1": "0xf0f0f0f0f0f0f0f0", "x2": "0x0ff00ff00ff00ff0" }, "output_kind": "reg_only",      "arch_expected": "0xfff0fff0fff0fff0" },
+    { "id": "eor_op",        "class": "logical",       "asm": "eor x0,x1,x2",                                             "inputs": { "x1": "0xf0f0f0f0f0f0f0f0", "x2": "0x0ff00ff00ff00ff0" }, "output_kind": "reg_only",      "arch_expected": "0xff00ff00ff00ff00" },
+    { "id": "lsl_op",        "class": "shift",         "asm": "mov x1,#1; lsl x0,x1,#40",                                 "inputs": { "x1": "0x1", "shift": 40 },                             "output_kind": "reg_only",       "arch_expected": "0x0000010000000000" },
+    { "id": "lsr_op",        "class": "shift",         "asm": "mov x1,#0x8000000000000000; lsr x0,x1,#63",                "inputs": { "x1": "0x8000000000000000", "shift": 63 },              "output_kind": "reg_only",       "arch_expected": "0x0000000000000001" },
+    { "id": "asr_op",        "class": "shift",         "asm": "mov x1,#0x8000000000000000; asr x0,x1,#63",                "inputs": { "x1": "0x8000000000000000", "shift": 63 },              "output_kind": "reg_only",       "arch_expected": "0xffffffffffffffff" },
+    { "id": "ror_op",        "class": "shift",         "asm": "mov x1,#1; ror x0,x1,#1",                                  "inputs": { "x1": "0x1", "shift": 1 },                              "output_kind": "reg_only",       "arch_expected": "0x8000000000000000" },
+    { "id": "clz_op",        "class": "bitmanip",      "asm": "mov x1,#1; clz x0,x1",                                     "inputs": { "x1": "0x1" },                                          "output_kind": "reg_only",       "arch_expected": "0x000000000000003f" },
+    { "id": "rbit_op",       "class": "bitmanip",      "asm": "mov x1,#1; rbit x0,x1",                                    "inputs": { "x1": "0x1" },                                          "output_kind": "reg_only",       "arch_expected": "0x8000000000000000" },
+    { "id": "rev_op",        "class": "bitmanip",      "asm": "mov x1,#0x0102030405060708; rev x0,x1",                    "inputs": { "x1": "0x0102030405060708" },                           "output_kind": "reg_only",       "arch_expected": "0x0807060504030201" },
+    { "id": "w_add_wrap",    "class": "integer-arith", "asm": "mov w1,#0xffffffff; add w0,w1,#1",                         "inputs": { "w1": "0xffffffff" },                                   "output_kind": "reg_only",       "arch_expected": "0x0000000000000000" },
+    { "id": "csel_false",    "class": "conditional",   "asm": "mov x1,#0xaaaa; mov x2,#0xbbbb; cmp x1,x2; csel x0,x1,x2,eq", "inputs": { "x1": "0xaaaa", "x2": "0xbbbb" },                     "output_kind": "reg_only",       "arch_expected": "0x000000000000bbbb" },
+    { "id": "cmp_eq_flags",  "class": "flags",         "asm": "mov x1,#5; mov x2,#5; subs x0,x1,x2",                      "inputs": { "x1": "0x5", "x2": "0x5" },                             "output_kind": "reg_with_flags", "arch_expected": "0x0000000000000000 nzcv=0x6" },
+    { "id": "subs_neg_flags","class": "flags",         "asm": "mov x1,#5; mov x2,#9; subs x0,x1,x2",                      "inputs": { "x1": "0x5", "x2": "0x9" },                             "output_kind": "reg_with_flags", "arch_expected": "0xfffffffffffffffc nzcv=0x8" },
+    { "id": "adds_carry",    "class": "flags",         "asm": "mov x1,#-1; mov x2,#1; adds x0,x1,x2",                     "inputs": { "x1": "0xffffffffffffffff", "x2": "0x1" },              "output_kind": "reg_with_flags", "arch_expected": "0x0000000000000000 nzcv=0x6" },
+    { "id": "adds_overflow", "class": "flags",         "asm": "mov x1,#0x7fffffffffffffff; mov x2,#1; adds x0,x1,x2",     "inputs": { "x1": "0x7fffffffffffffff", "x2": "0x1" },              "output_kind": "reg_with_flags", "arch_expected": "0x8000000000000000 nzcv=0x9" },
+
+    { "id": "seed_negctrl",  "class": "negative-control", "seed_mismatch": true, "asm": "mov x1,#1; mov x2,#2; add x0,x1,x2", "inputs": { "x1": "0x1", "x2": "0x2" },                          "output_kind": "reg_only",       "arch_expected": "0x0000000000000003",
+      "note": "Negative control. Architecturally identical to add_basic (1+2=3). The SUT runner mutates this entry's output (flip bit 0 -> 0x...2) in seed mode; the reference reports 0x...3. The diff engine MUST flag exactly this entry and no other." }
+  ]
+}
