@@ -54,7 +54,7 @@ def main():
     ap.add_argument("--qerr", required=True)
     a = ap.parse_args()
 
-    cpu_model = sh("grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //") or platform.machine()
+    cpu_model = sh("grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //'") or platform.machine()
     res = {
         "schema": "gae-smoke/run-result@1",
         "work_item": "W0.5",
