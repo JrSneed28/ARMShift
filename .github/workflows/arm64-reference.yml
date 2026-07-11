@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   reference:
@@ -138,3 +138,21 @@ jobs:
             engine.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Publish reference bundle into repo (reference/) for offline differential
+        if: success()
+        run: |
+          set -euo pipefail
+          mkdir -p reference
+          cp results-reference.json runner-raw.reference.txt provenance.txt engine.json reference/
+          base64 -w0 corpus_runner > reference/corpus_runner.b64
+          sha256sum corpus_runner | cut -d' ' -f1 > reference/corpus_runner.sha256
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f reference/
+          if git diff --cached --quiet; then
+            echo "no reference changes to commit"
+          else
+            git commit -m "reference bundle: native ubuntu-24.04-arm run [skip ci]"
+            git push
+          fi
