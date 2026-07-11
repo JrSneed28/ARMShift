@@ -1,0 +1,72 @@
+{
+  "manifest_id": "GAE-SMOKE-MANIFEST",
+  "manifest_version": 1,
+  "engine_internal_name": "generic-arm64-engine",
+  "work_item": "W0.3",
+  "description": "Fixed command manifest for the W0.3 generic ARM64 guest smoke test. This file is the single, reviewable source of truth for WHAT the smoke test checks. render_seed.py compiles it into the cloud-init user-data runner; parse_transcript.py verifies the captured serial transcript against it. Changing this file changes the smoke test, and is reviewable in version control.",
+  "sentinels": {
+    "manifest_begin": "=== GAE-SMOKE MANIFEST BEGIN version={version} ===",
+    "manifest_end": "=== GAE-SMOKE MANIFEST END ok={ok} ===",
+    "cmd_begin": "=== GAE-SMOKE CMD BEGIN id={id} argv=[{argv}] ===",
+    "cmd_end": "=== GAE-SMOKE CMD END id={id} rc={rc} ==="
+  },
+  "commands": [
+    {
+      "id": "uname_a",
+      "argv": ["uname", "-a"],
+      "description": "Kernel and architecture banner; proves a running ARM64 Linux kernel.",
+      "expect_rc": 0,
+      "expect_stdout_contains": "aarch64"
+    },
+    {
+      "id": "uname_m",
+      "argv": ["uname", "-m"],
+      "description": "Machine hardware name; must be exactly aarch64 (the ARM64 assertion).",
+      "expect_rc": 0,
+      "expect_stdout_equals": "aarch64"
+    },
+    {
+      "id": "os_release",
+      "argv": ["cat", "/etc/os-release"],
+      "description": "Guest identity; confirms the pinned generic Alpine guest booted.",
+      "expect_rc": 0,
+      "expect_stdout_contains": "Alpine Linux"
+    },
+    {
+      "id": "whoami",
+      "argv": ["id"],
+      "description": "Shell execution context; a usable root shell answered.",
+      "expect_rc": 0,
+      "expect_stdout_contains": "uid=0"
+    },
+    {
+      "id": "nproc",
+      "argv": ["nproc"],
+      "description": "CPU count visible to the guest under TCG SMP.",
+      "expect_rc": 0
+    },
+    {
+      "id": "clocksource",
+      "argv": ["cat", "/sys/devices/system/clocksource/clocksource0/current_clocksource"],
+      "description": "Active clocksource; the ARM generic timer is present and selected.",
+      "expect_rc": 0,
+      "expect_stdout_contains": "arch_sys_counter"
+    },
+    {
+      "id": "echo_token",
+      "argv": ["echo", "GAE-SMOKE-TOKEN-8f3a12c7"],
+      "description": "Literal echo; proves the shell runs our exact command and returns its output over the serial console.",
+      "expect_rc": 0,
+      "expect_stdout_contains": "GAE-SMOKE-TOKEN-8f3a12c7"
+    }
+  ],
+  "shutdown": {
+    "description": "Clean power-off must be observed on the serial console AND QEMU must exit on its own (guest-initiated PSCI SYSTEM_OFF), not via the harness timeout.",
+    "expect_console_markers_any": [
+      "reboot: Power down",
+      "Power down",
+      "Powering off",
+      "reboot: System halted"
+    ]
+  }
+}
