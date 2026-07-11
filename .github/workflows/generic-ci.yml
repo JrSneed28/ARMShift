@@ -1,0 +1,262 @@
+name: Generic ARM64 CI (W0.5)
+
+# W0.5 -- Public generic CI for the generic-arm64-engine.
+#
+# PER-CHANGE LANE (on each change): rebuild the pinned QEMU 11.0.2 (TCG + virt)
+# from signature-verified source, run the W0.3 generic-guest smoke test, and run
+# the BOUNDED W0.4 differential corpus against the committed native-ARM64
+# reference (reference/results-reference.json, produced by the separate
+# arm64-reference.yml oracle lane). The pipeline retains its logs and hashes --
+# it is evidence, not just a signal (plan section 3 W0.5).
+#
+# SCHEDULED / SOAK LANE (cron or manual): a longer conformance/soak variant that
+# does not fit a per-change budget. The full 72-hour per-host soak is Stage A
+# WA.5 and is deliberately NOT run here.
+#
+# Generic only: builds and tests the generic ARM64 guest under TCG. This public
+# CI contains only generic ARM64 artifacts -- no vendor-specific inputs,
+# configuration, secrets, or additional guest lanes. Free GitHub-hosted runners
+# only; no billable cloud, no secrets.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'sut/**'
+      - 'harness/**'
+      - 'reference/results-reference.json'
+      - 'reference/corpus_runner.b64'
+      - 'reference/corpus_runner.sha256'
+      - '.github/workflows/generic-ci.yml'
+  pull_request:
+    paths:
+      - 'sut/**'
+      - 'harness/**'
+      - '.github/workflows/generic-ci.yml'
+  workflow_dispatch:
+    inputs:
+      run_soak:
+        description: 'Also run the longer scheduled conformance/soak lane'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 5 * * *'   # daily: the longer conformance/soak lane
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generic-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  per-change:
+    if: github.event_name != 'schedule'
+    name: Per-change lane (rebuild QEMU + W0.3 smoke + bounded W0.4 corpus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build + boot dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config python3 python3-pip \
+            libglib2.0-dev libpixman-1-dev libslirp-dev zlib1g-dev \
+            flex bison ccache xorriso gnupg2 ca-certificates curl meson
+          meson --version
+          ninja --version
+          xorriso --version | head -1
+
+      - name: Cache ccache (speeds the rebuild; the binary is still relinked each run)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-qemu-1102-${{ runner.os }}
+          restore-keys: ccache-qemu-1102-
+
+      - name: Rebuild pinned QEMU 11.0.2 (TCG + virt) from verified source
+        run: bash sut/build_qemu.sh
+
+      - name: Prove the rebuilt binary reports TCG and has KVM/WHPX compiled out
+        run: |
+          set -euo pipefail
+          "$QEMU_BIN" --version
+          "$QEMU_BIN" -accel help | tee accel.txt
+          grep -qw tcg accel.txt || { echo "FAIL: tcg not reported" >&2; exit 1; }
+          if grep -qiw kvm accel.txt;  then echo "FAIL: kvm accelerator present (should be compiled out)"  >&2; exit 1; fi
+          if grep -qiw whpx accel.txt; then echo "FAIL: whpx accelerator present (should be compiled out)" >&2; exit 1; fi
+          echo "OK: binary reports TCG; KVM and WHPX are compiled out"
+
+      - name: Prepare pinned inputs (firmware from source tree + Alpine image)
+        run: |
+          set -euo pipefail
+          mkdir -p .w05/fw .w05/dl
+          python3 sut/prepare_inputs.py \
+            --src-tree "$QEMU_SRC_TREE" \
+            --firmware-dir .w05/fw \
+            --image-path .w05/dl/alpine-aarch64.qcow2 \
+            --allow-download
+
+      - name: W0.3 smoke test (boot pinned Alpine aarch64 under TCG)
+        run: |
+          set -euo pipefail
+          python3 sut/smoke/render_seed.py \
+            --manifest sut/smoke/command-manifest.json --out .w05/seed-smoke
+          xorriso -as mkisofs -o .w05/seed-smoke.iso -V CIDATA -J -r .w05/seed-smoke
+          bash sut/run_guest.sh \
+            --qemu "$QEMU_BIN" --image .w05/dl/alpine-aarch64.qcow2 --seed .w05/seed-smoke.iso \
+            --code-fd .w05/fw/edk2-aarch64-code.fd --vars-fd .w05/fw/edk2-arm-vars.fd \
+            --out .w05/smoke --timeout 1200 || true
+          python3 sut/smoke/parse_transcript.py \
+            --transcript .w05/smoke/boot-transcript.log \
+            --run-result .w05/smoke/run-result.json \
+            --manifest  sut/smoke/command-manifest.json \
+            --out-json  .w05/smoke/boot-transcript.json \
+            --out-junit .w05/smoke/smoke-junit.xml
+
+      - name: Bounded W0.4 corpus (SUT under TCG) + differential vs native-ARM64 reference
+        run: |
+          set -euo pipefail
+          python3 sut/render_corpus_seed.py \
+            --runner-b64 reference/corpus_runner.b64 \
+            --runner-sha256 reference/corpus_runner.sha256 \
+            --out .w05/seed-corpus
+          xorriso -as mkisofs -o .w05/seed-corpus.iso -V CIDATA -J -r .w05/seed-corpus
+          bash sut/run_guest.sh \
+            --qemu "$QEMU_BIN" --image .w05/dl/alpine-aarch64.qcow2 --seed .w05/seed-corpus.iso \
+            --code-fd .w05/fw/edk2-aarch64-code.fd --vars-fd .w05/fw/edk2-arm-vars.fd \
+            --out .w05/corpus --timeout 1200 || true
+          python3 sut/extract_corpus.py \
+            --transcript .w05/corpus/boot-transcript.log --out .w05/corpus/runner-raw.sut.txt
+          ENGINE_JSON="$(python3 -c 'import json,os;print(json.dumps({"qemu_sha256":os.environ.get("QEMU_BIN_SHA",""),"accel":"tcg","runner":"github-actions ubuntu-latest","note":"W0.5 SUT lane; same static binary as the native ARM64 reference"}))')"
+          python3 harness/collect_results.py --manifest harness/corpus-manifest.json \
+            --raw .w05/corpus/runner-raw.sut.txt --side sut --seed \
+            --engine-json "$ENGINE_JSON" --out .w05/corpus/results-sut.json
+          python3 harness/diff_corpus.py --manifest harness/corpus-manifest.json \
+            --sut .w05/corpus/results-sut.json --reference reference/results-reference.json \
+            --out .w05/corpus/diff-report.json --text .w05/corpus/diff-report.txt
+          echo "VERDICT VALID: good corpus passes AND seeded mismatch rejected"
+
+      - name: Negative control -- unseeded SUT MUST be rejected (harness fails closed)
+        run: |
+          set -euo pipefail
+          python3 harness/collect_results.py --manifest harness/corpus-manifest.json \
+            --raw .w05/corpus/runner-raw.sut.txt --side sut \
+            --engine-json '{"note":"negative control (unseeded)"}' \
+            --out .w05/corpus/results-sut-noseed.json
+          if python3 harness/diff_corpus.py --manifest harness/corpus-manifest.json \
+               --sut .w05/corpus/results-sut-noseed.json --reference reference/results-reference.json \
+               --out .w05/corpus/diff-report-negctrl.json --text .w05/corpus/diff-report-negctrl.txt; then
+            echo "FAIL: unseeded control was accepted -- the harness cannot be shown to fail closed" >&2
+            exit 1
+          fi
+          echo "OK: unseeded control correctly rejected (INVALID)"
+
+      - name: Harness self-test
+        run: python3 harness/selftest_diff.py
+
+      - name: Assemble retained hash manifest (logs + hashes are the deliverable)
+        if: always()
+        run: python3 sut/make_ci_manifest.py --root .w05 --out .w05/ci-manifest.json
+
+      - name: Upload retained pipeline evidence (logs + hashes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generic-ci-bundle
+          path: |
+            .w05/qemu/logs
+            .w05/smoke/boot-transcript.log
+            .w05/smoke/boot-transcript.json
+            .w05/smoke/smoke-junit.xml
+            .w05/smoke/run-result.json
+            .w05/smoke/qemu-stderr.log
+            .w05/corpus/boot-transcript.log
+            .w05/corpus/runner-raw.sut.txt
+            .w05/corpus/results-sut.json
+            .w05/corpus/results-sut-noseed.json
+            .w05/corpus/diff-report.json
+            .w05/corpus/diff-report.txt
+            .w05/corpus/diff-report-negctrl.json
+            .w05/corpus/run-result.json
+            .w05/ci-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  soak:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)
+    name: Scheduled conformance/soak lane (longer; not per-change)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SOAK_CYCLES: '3'   # bounded conformance repeat; the full 72h host soak is Stage A WA.5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build + boot dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config python3 python3-pip \
+            libglib2.0-dev libpixman-1-dev libslirp-dev zlib1g-dev \
+            flex bison ccache xorriso gnupg2 ca-certificates curl meson
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-qemu-1102-${{ runner.os }}
+          restore-keys: ccache-qemu-1102-
+
+      - name: Rebuild pinned QEMU 11.0.2 (TCG + virt) from verified source
+        run: bash sut/build_qemu.sh
+
+      - name: Prepare pinned inputs
+        run: |
+          set -euo pipefail
+          mkdir -p .w05/fw .w05/dl
+          python3 sut/prepare_inputs.py --src-tree "$QEMU_SRC_TREE" \
+            --firmware-dir .w05/fw --image-path .w05/dl/alpine-aarch64.qcow2 --allow-download
+
+      - name: Longer conformance/soak -- repeat the bounded corpus differential
+        run: |
+          set -euo pipefail
+          python3 sut/render_corpus_seed.py \
+            --runner-b64 reference/corpus_runner.b64 \
+            --runner-sha256 reference/corpus_runner.sha256 --out .w05/seed-corpus
+          xorriso -as mkisofs -o .w05/seed-corpus.iso -V CIDATA -J -r .w05/seed-corpus
+          ENGINE_JSON="$(python3 -c 'import json,os;print(json.dumps({"qemu_sha256":os.environ.get("QEMU_BIN_SHA",""),"accel":"tcg","runner":"github-actions ubuntu-latest (soak)"}))')"
+          mkdir -p .w05/soak
+          for i in $(seq 1 "${SOAK_CYCLES}"); do
+            echo "==== soak cycle $i / ${SOAK_CYCLES} ===="
+            bash sut/run_guest.sh \
+              --qemu "$QEMU_BIN" --image .w05/dl/alpine-aarch64.qcow2 --seed .w05/seed-corpus.iso \
+              --code-fd .w05/fw/edk2-aarch64-code.fd --vars-fd .w05/fw/edk2-arm-vars.fd \
+              --out ".w05/corpus-$i" --timeout 1200 || true
+            python3 sut/extract_corpus.py --transcript ".w05/corpus-$i/boot-transcript.log" \
+              --out ".w05/corpus-$i/runner-raw.sut.txt"
+            python3 harness/collect_results.py --manifest harness/corpus-manifest.json \
+              --raw ".w05/corpus-$i/runner-raw.sut.txt" --side sut --seed \
+              --engine-json "$ENGINE_JSON" --out ".w05/corpus-$i/results-sut.json"
+            python3 harness/diff_corpus.py --manifest harness/corpus-manifest.json \
+              --sut ".w05/corpus-$i/results-sut.json" --reference reference/results-reference.json \
+              --out ".w05/soak/diff-cycle-$i.json" --text ".w05/soak/diff-cycle-$i.txt"
+          done
+          echo "soak: ${SOAK_CYCLES}/${SOAK_CYCLES} cycles VALID"
+
+      - name: Upload soak evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generic-ci-soak-bundle
+          path: |
+            .w05/qemu/logs
+            .w05/soak
+          if-no-files-found: error
+          retention-days: 90
