@@ -1,0 +1,39 @@
+{
+  "schema": "gae-diff/results@1",
+  "side": "reference",
+  "corpus_manifest_version": 1,
+  "corpus_manifest_sha256": "849d4ea1696536cdba373897783ef5ddfcf3872acd1881656c46e3cf80ff6e1b",
+  "seed_active": false,
+  "engine": {
+    "arm64_profile": "Architecture:                            aarch64\nCPU op-mode(s):                          32-bit, 64-bit\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               ARM\nModel name:                              Neoverse-N2\nModel:                                   0\nThread(s) per core:                      1\nCore(s) per socket:                      4\nSocket(s):                               1\nStepping:                                r0p0\nBogoMIPS:                                2000.00\nFlags:                                   fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve asimdfhm uscat ilrcpc flagm sb paca pacg dcpodp sve2 sveaes svebitperm svesha3 svesm4 flagm2 frint svei8mm svebf16 i8mm bf16\nL1d cache:                               256 KiB (4 instances)\nL1i cache:                               256 KiB (4 instances)\nL2 cache:                                4 MiB (4 instances)\nL3 cache:                                128 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3",
+    "uname_m": "aarch64",
+    "uname_a": "Linux runnervmrvz09 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:41:33 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux",
+    "virt": "microsoft",
+    "runner_sha256": "3a42be79b0ccf15ea790e9e715d653184cb6d02f75bb1f5f3245923b3a1b9f63",
+    "reference_source": "github-actions ubuntu-24.04-arm (standard hosted runner)"
+  },
+  "results": {
+    "add_basic": "0x0000000000000003",
+    "add_wrap": "0x0000000000000000",
+    "sub_neg": "0xfffffffffffffffc",
+    "mul_low": "0x0000000000000000",
+    "umulh_high": "0x0000000000000001",
+    "and_op": "0x00f000f000f000f0",
+    "orr_op": "0xfff0fff0fff0fff0",
+    "eor_op": "0xff00ff00ff00ff00",
+    "lsl_op": "0x0000010000000000",
+    "lsr_op": "0x0000000000000001",
+    "asr_op": "0xffffffffffffffff",
+    "ror_op": "0x8000000000000000",
+    "clz_op": "0x000000000000003f",
+    "rbit_op": "0x8000000000000000",
+    "rev_op": "0x0807060504030201",
+    "w_add_wrap": "0x0000000000000000",
+    "csel_false": "0x000000000000bbbb",
+    "cmp_eq_flags": "0x0000000000000000 nzcv=0x6",
+    "subs_neg_flags": "0xfffffffffffffffc nzcv=0x8",
+    "adds_carry": "0x0000000000000000 nzcv=0x6",
+    "adds_overflow": "0x8000000000000000 nzcv=0x9",
+    "seed_negctrl": "0x0000000000000003"
+  }
+}

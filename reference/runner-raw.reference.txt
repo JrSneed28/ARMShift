@@ -1,0 +1,22 @@
+add_basic	0x0000000000000003
+add_wrap	0x0000000000000000
+sub_neg	0xfffffffffffffffc
+mul_low	0x0000000000000000
+umulh_high	0x0000000000000001
+and_op	0x00f000f000f000f0
+orr_op	0xfff0fff0fff0fff0
+eor_op	0xff00ff00ff00ff00
+lsl_op	0x0000010000000000
+lsr_op	0x0000000000000001
+asr_op	0xffffffffffffffff
+ror_op	0x8000000000000000
+clz_op	0x000000000000003f
+rbit_op	0x8000000000000000
+rev_op	0x0807060504030201
+w_add_wrap	0x0000000000000000
+csel_false	0x000000000000bbbb
+cmp_eq_flags	0x0000000000000000 nzcv=0x6
+subs_neg_flags	0xfffffffffffffffc nzcv=0x8
+adds_carry	0x0000000000000000 nzcv=0x6
+adds_overflow	0x8000000000000000 nzcv=0x9
+seed_negctrl	0x0000000000000003
