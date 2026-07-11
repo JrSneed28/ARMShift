@@ -1,0 +1,45 @@
+{
+  "record": "W0.5 public-CI SUT-lane pinned inputs (Linux hosted runner)",
+  "engine_internal_name": "generic-arm64-engine",
+  "work_item": "W0.5",
+  "note": "The public per-change CI rebuilds the pinned QEMU from signature-verified source and boots the pinned generic ARM64 guest under TCG. Every input is pinned by SHA-256 and verified fail-closed. This lane runs on a GitHub-hosted ubuntu-latest runner; unlike the Windows build stack it pins no MSYS2 DLL closure (a native Linux build has no such runtime) and pins no host-specific QEMU binary hash (the binary is rebuilt from source each run, so its hash is recorded per run, not pinned). The QEMU SOURCE tarball, the UEFI firmware, the guest image, and the CPU model are pinned. This lane contains only generic ARM64 inputs; no vendor-specific input or configuration.",
+  "qemu": {
+    "version": "11.0.2",
+    "source_tarball": "qemu-11.0.2.tar.xz",
+    "source_url": "https://download.qemu.org/qemu-11.0.2.tar.xz",
+    "source_sig_url": "https://download.qemu.org/qemu-11.0.2.tar.xz.sig",
+    "source_sha256": "3745f6ea88e2e87fe0dc838b2b1d4e0a770bf48e01a1d5a186842a1fff76ccf5",
+    "release_key_fpr": "CEACC9E15534EBABB82D3FA03353C9CEF108B584",
+    "release_key_note": "QEMU release manager (Michael Roth). Fingerprint published over HTTPS at https://www.qemu.org/download/. build_qemu.sh imports the key and asserts the imported primary fingerprint equals this constant before trusting the signature; signature verification precedes SHA-256 recording precedes the build (plan section 3 W0.2).",
+    "cpu": "cortex-a72",
+    "smp": 2,
+    "mem_mib": 2048,
+    "source": "W0.2 pin (plan front matter, section 0.3 Execution locks). Rebuilt here per W0.5 DoD 'On each change it rebuilds'."
+  },
+  "firmware": {
+    "provenance": "QEMU 11.0.2 pc-bios, decompressed from the signature-verified source tree. No new external firmware pin. The decompressed .fd SHA-256 values below are byte-identical to the W0.3 firmware.",
+    "code": {
+      "source_bz2_relpath": "pc-bios/edk2-aarch64-code.fd.bz2",
+      "source_bz2_sha256": "c023444108b7a132fdebf70c4765cd2dd9af2a9ff7d001a743aaabe87c20a458",
+      "decompressed_sha256": "47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d",
+      "bytes": 67108864
+    },
+    "vars": {
+      "source_bz2_relpath": "pc-bios/edk2-arm-vars.fd.bz2",
+      "source_bz2_sha256": "0011d83b5e67c691a58e3ae25a2e7fdf1d245a73d1b2b8bccb24af1a8c2e2523",
+      "decompressed_sha256": "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f",
+      "bytes": 67108864
+    }
+  },
+  "guest_image": {
+    "class": "generic redistributable",
+    "distro": "Alpine Linux 3.23.4 aarch64 (nocloud, uefi, cloudinit)",
+    "name": "nocloud_alpine-3.23.4-aarch64-uefi-cloudinit-r0.qcow2",
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/nocloud_alpine-3.23.4-aarch64-uefi-cloudinit-r0.qcow2",
+    "version": "3.23.4-aarch64-uefi-cloudinit-r0",
+    "sha256": "eeda75c83fcade4c9f0c461c923b965df0fb1b294e5c66d4ef09ed0dc2ad360c",
+    "sha512_recorded": "737b0eb365944ffcf6da477c059c105bbde222942fd5a8380c07db088365b18dbc60a0f2824ea9a3904d57e194e0d05a7074302c3ebc104d0aecb6ddc6ffd91c",
+    "bytes": 235077632,
+    "trust_basis": "The pin is the SHA-256 recorded here. The upstream-published SHA-512 recorded here is re-verified against the downloaded bytes at run time. SHA-256 pinning is the integrity mechanism; identical to the W0.3 pin."
+  }
+}
