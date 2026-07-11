@@ -1,0 +1,13 @@
+# Build / run outputs (never committed; produced by CI or local runs)
+corpus_runner
+*.o
+runner-raw.*.txt
+results-*.json
+diff-report.json
+diff-report.txt
+provenance.txt
+engine.json
+
+# Python
+__pycache__/
+*.pyc
