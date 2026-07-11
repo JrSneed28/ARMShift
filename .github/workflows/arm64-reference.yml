@@ -1,0 +1,140 @@
+name: ARM64 reference (differential oracle)
+
+# Produces the INDEPENDENT semantic reference for the ARMShift differential harness:
+# the bounded ARM64 architecture corpus, compiled and run NATIVELY on genuine ARM64
+# silicon (GitHub-hosted ubuntu-24.04-arm). This side is the oracle. It must never be
+# emulated -- the job fails closed if the runner is not real aarch64 hardware, or if it
+# is a qemu/tcg emulation. The system-under-test side (a pinned qemu-system-aarch64 TCG
+# build) is produced separately, off this runner, and diffed against this bundle.
+#
+# Free on public repositories; uses only GitHub standard hosted runners. No third-party
+# cloud (AWS/Azure/GCP) is provisioned. No secrets are used or printed.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'harness/**'
+      - '.github/workflows/arm64-reference.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    name: Native ARM64 reference run
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prove genuine ARM64 silicon (fail-closed if emulated)
+        run: |
+          set -euo pipefail
+          UM="$(uname -m)"
+          VIRT="$(systemd-detect-virt || true)"
+          echo "uname -m           : ${UM}"
+          echo "uname -a           : $(uname -a)"
+          echo "systemd-detect-virt: ${VIRT:-<none>}"
+          # Oracle-independence gate (DoD #4): the reference MUST be genuine aarch64
+          # silicon, and MUST NOT be a qemu/tcg emulation. A cloud hypervisor is allowed.
+          if [ "${UM}" != "aarch64" ]; then
+            echo "REJECTED: uname -m is '${UM}', not aarch64 -- not a valid ARM64 oracle." >&2
+            exit 1
+          fi
+          case "${VIRT}" in
+            qemu|tcg)
+              echo "REJECTED: systemd-detect-virt='${VIRT}' -- emulated, not an independent oracle (DoD #4)." >&2
+              exit 1 ;;
+          esac
+          {
+            echo "uname_m=${UM}"
+            echo "uname_a=$(uname -a)"
+            echo "systemd_detect_virt=${VIRT:-none}"
+            echo "runner_os=${RUNNER_OS:-}"
+            echo "runner_arch=${RUNNER_ARCH:-}"
+            echo "image_os=${ImageOS:-}"
+            echo "--- /proc/cpuinfo identity ---"
+            grep -E 'CPU implementer|CPU part|CPU architecture|Features|BogoMIPS' /proc/cpuinfo | sort -u || true
+            echo "--- lscpu ---"
+            lscpu || true
+          } > provenance.txt
+          echo "----- provenance.txt -----"
+          cat provenance.txt
+
+      - name: Compile corpus runner (native aarch64, static)
+        run: |
+          set -euo pipefail
+          cc -O0 -std=c11 -Wall -Wextra -static -o corpus_runner harness/corpus_runner.c
+          echo "file: $(file corpus_runner)"
+          file corpus_runner | grep -q 'ARM aarch64' \
+            || { echo "REJECTED: corpus_runner is not an aarch64 ELF." >&2; exit 1; }
+          RUNNER_SHA="$(sha256sum corpus_runner | cut -d' ' -f1)"
+          echo "corpus_runner sha256: ${RUNNER_SHA}"
+          echo "runner_sha256=${RUNNER_SHA}" >> provenance.txt
+          echo "RUNNER_SHA=${RUNNER_SHA}" >> "$GITHUB_ENV"
+
+      - name: Run corpus natively (NOT emulated) -> raw reference output
+        run: |
+          set -euo pipefail
+          ./corpus_runner > runner-raw.reference.txt
+          N="$(wc -l < runner-raw.reference.txt)"
+          echo "runner emitted ${N} line(s) (expect 22)"
+          [ "${N}" -eq 22 ] || { echo "REJECTED: expected 22 lines, got ${N}." >&2; exit 1; }
+          echo "----- runner-raw.reference.txt -----"
+          cat runner-raw.reference.txt
+
+      - name: Build engine provenance JSON
+        run: |
+          set -euo pipefail
+          python3 - > engine.json <<'PY'
+          import json, os, subprocess
+          def sh(c):
+              try:
+                  return subprocess.check_output(c, shell=True, text=True).strip()
+              except Exception:
+                  return ""
+          print(json.dumps({
+              "arm64_profile": sh("lscpu | sed -n '1,20p'")[:1500] or "aarch64",
+              "uname_m": sh("uname -m"),
+              "uname_a": sh("uname -a"),
+              "virt": sh("systemd-detect-virt") or "none",
+              "runner_sha256": os.environ.get("RUNNER_SHA", ""),
+              "reference_source": "github-actions ubuntu-24.04-arm (standard hosted runner)",
+          }))
+          PY
+          echo "----- engine.json -----"
+          cat engine.json
+
+      - name: Collect reference result bundle (never seeded)
+        run: |
+          set -euo pipefail
+          python3 harness/collect_results.py \
+            --manifest harness/corpus-manifest.json \
+            --raw runner-raw.reference.txt \
+            --side reference \
+            --engine-json "$(cat engine.json)" \
+            --out results-reference.json
+          echo "----- results-reference.json -----"
+          cat results-reference.json
+          echo "results-reference.json sha256: $(sha256sum results-reference.json | cut -d' ' -f1)"
+
+      - name: Harness self-test on ARM64 (proves it rejects a seeded mismatch)
+        run: |
+          set -euo pipefail
+          python3 harness/selftest_diff.py
+
+      - name: Upload reference bundle + shared static binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-reference-bundle
+          path: |
+            results-reference.json
+            runner-raw.reference.txt
+            corpus_runner
+            provenance.txt
+            engine.json
+          if-no-files-found: error
+          retention-days: 90
