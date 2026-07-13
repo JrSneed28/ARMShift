@@ -45,7 +45,16 @@ jobs:
 
       - name: Self-test (fail-closed detection proof)
         if: steps.provision.outputs.have_bundle == 'true'
-        run: python3 "${RUNNER_TEMP}/leakscan/selftest_leakscan.py"
+        run: |
+          set -uo pipefail
+          # Run the detection self-test but keep its output OUT of the public log
+          # (it enumerates rule names/shape identifiers). Surface pass/fail only.
+          if python3 "${RUNNER_TEMP}/leakscan/selftest_leakscan.py" > "${RUNNER_TEMP}/selftest.out" 2>&1; then
+            echo "self-test: PASSED (detail withheld from public log)"
+          else
+            echo "::error::self-test FAILED (detail withheld from public log; inspect privately)"
+            exit 1
+          fi
 
       - name: Scan working tree (fail-closed; matched content withheld from public log)
         if: steps.provision.outputs.have_bundle == 'true'
