@@ -1,0 +1,66 @@
+name: Repository hygiene scan (secret + artifact leak gate)
+
+# Fail-closed hygiene gate for this public repository. Scans the checked-out
+# working tree for prohibited artifacts and secret material. The scanner and its
+# rule set are provisioned at RUNTIME from the private LEAKSCAN_BUNDLE repository
+# secret (base64 tar.gz); nothing sensitive is committed to this public repo, and
+# rule content is never printed to the (public) job log. On a same-repo push/PR
+# the secret is present; on a fork PR GitHub withholds it, so the gate no-ops with
+# a notice (main stays protected by the push-trigger run).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene-scan:
+    name: Secret + artifact leak gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Provision scanner from private secret
+        id: provision
+        env:
+          LEAKSCAN_BUNDLE: ${{ secrets.LEAKSCAN_BUNDLE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LEAKSCAN_BUNDLE:-}" ]; then
+            echo "::notice::LEAKSCAN_BUNDLE not available (fork PR); hygiene gate no-op. main is protected by the push-trigger run."
+            echo "have_bundle=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DEST="${RUNNER_TEMP}/leakscan"
+          mkdir -p "$DEST"
+          printf '%s' "$LEAKSCAN_BUNDLE" | base64 -d | tar -C "$DEST" -xzf -
+          test -f "$DEST/leakscan.py" && test -f "$DEST/leak-patterns.json"
+          echo "have_bundle=true" >> "$GITHUB_OUTPUT"
+          echo "scanner provisioned"
+
+      - name: Self-test (fail-closed detection proof)
+        if: steps.provision.outputs.have_bundle == 'true'
+        run: python3 "${RUNNER_TEMP}/leakscan/selftest_leakscan.py"
+
+      - name: Scan working tree (fail-closed; matched content withheld from public log)
+        if: steps.provision.outputs.have_bundle == 'true'
+        run: |
+          set -uo pipefail
+          rc=0
+          python3 "${RUNNER_TEMP}/leakscan/leakscan.py" \
+            --patterns "${RUNNER_TEMP}/leakscan/leak-patterns.json" \
+            --root "${GITHUB_WORKSPACE}" \
+            --exclude "${GITHUB_WORKSPACE}/.git" \
+            --out "${RUNNER_TEMP}/scan-report.json" \
+            --text "${RUNNER_TEMP}/scan-report.txt" || rc=$?
+          tail -n 3 "${RUNNER_TEMP}/scan-report.txt" || true
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::hygiene gate: leak detected (matched content withheld from public log; inspect privately)"
+            exit "$rc"
+          fi
+          echo "hygiene gate: CLEAN"
