@@ -1,0 +1,178 @@
+name: ARM64 valid-corpus reference (54-entry)
+
+# Produces the INDEPENDENT semantic reference for the 54-entry (53 required + 1 seeded
+# negative control) ARM64 architecture corpus, compiled and run NATIVELY on genuine
+# ARM64 silicon (GitHub-hosted ubuntu-24.04-arm). This side is the oracle. It must never
+# be emulated -- the job fails closed if the runner is not real aarch64 hardware, or if
+# it is a qemu/tcg emulation. The system-under-test side (a pinned qemu-system-aarch64
+# TCG build) is produced separately, off this runner, and diffed against this bundle.
+#
+# Free on public repositories; uses only GitHub standard hosted runners. No third-party
+# cloud (AWS/Azure/GCP) is provisioned. No secrets are used or printed.
+#
+# The reference result set binds to sha256(harness-valid/valid-corpus-manifest.json).
+# The SUT result set must be collected against the same manifest bytes so both sides
+# carry an identical corpus_manifest_sha256; diff_corpus.py fails closed otherwise.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'harness-valid/**'
+      - '.github/workflows/arm64-valid-corpus-reference.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  reference:
+    name: Native ARM64 valid-corpus reference run
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prove genuine ARM64 silicon (fail-closed if emulated)
+        run: |
+          set -euo pipefail
+          UM="$(uname -m)"
+          VIRT="$(systemd-detect-virt || true)"
+          echo "uname -m           : ${UM}"
+          echo "uname -a           : $(uname -a)"
+          echo "systemd-detect-virt: ${VIRT:-<none>}"
+          # Oracle-independence gate: the reference MUST be genuine aarch64 silicon and
+          # MUST NOT be a qemu/tcg emulation. A cloud hypervisor is allowed.
+          if [ "${UM}" != "aarch64" ]; then
+            echo "REJECTED: uname -m is '${UM}', not aarch64 -- not a valid ARM64 oracle." >&2
+            exit 1
+          fi
+          case "${VIRT}" in
+            qemu|tcg)
+              echo "REJECTED: systemd-detect-virt='${VIRT}' -- emulated, not an independent oracle." >&2
+              exit 1 ;;
+          esac
+          {
+            echo "uname_m=${UM}"
+            echo "uname_a=$(uname -a)"
+            echo "systemd_detect_virt=${VIRT:-none}"
+            echo "runner_os=${RUNNER_OS:-}"
+            echo "runner_arch=${RUNNER_ARCH:-}"
+            echo "image_os=${ImageOS:-}"
+            echo "--- /proc/cpuinfo identity ---"
+            grep -E 'CPU implementer|CPU part|CPU architecture|Features|BogoMIPS' /proc/cpuinfo | sort -u || true
+            echo "--- lscpu ---"
+            lscpu || true
+          } > provenance.txt
+          echo "----- provenance.txt -----"
+          cat provenance.txt
+
+      - name: Compile valid-corpus runner (native aarch64, static)
+        run: |
+          set -euo pipefail
+          # -march=armv8-a+lse: the corpus exercises FEAT_LSE atomics (cas/ldadd/swp).
+          cc -O0 -std=c11 -Wall -Wextra -march=armv8-a+lse -static \
+             -o valid_corpus_runner harness-valid/valid_corpus_runner.c
+          echo "file: $(file valid_corpus_runner)"
+          file valid_corpus_runner | grep -q 'ARM aarch64' \
+            || { echo "REJECTED: valid_corpus_runner is not an aarch64 ELF." >&2; exit 1; }
+          RUNNER_SHA="$(sha256sum valid_corpus_runner | cut -d' ' -f1)"
+          echo "valid_corpus_runner sha256: ${RUNNER_SHA}"
+          echo "runner_sha256=${RUNNER_SHA}" >> provenance.txt
+          echo "RUNNER_SHA=${RUNNER_SHA}" >> "$GITHUB_ENV"
+          # Record the reference compiler for parity with the SUT toolchain (Alpine gcc 15.2.0).
+          # sed -n '1p' (not head) drains the whole stream so cc never gets SIGPIPE under pipefail.
+          CC_VERSION="$(cc --version 2>&1 | sed -n '1p')"
+          echo "cc_version: ${CC_VERSION}"
+          echo "cc_version=${CC_VERSION}" >> provenance.txt
+          echo "CC_VERSION=${CC_VERSION}" >> "$GITHUB_ENV"
+
+      - name: check-mode self-check on genuine silicon (arch oracle)
+        run: |
+          set -euo pipefail
+          # 'check' mode uses the baked architectural expectation as its self-oracle.
+          # Passing here on real silicon confirms the runner and expectations agree on
+          # genuine hardware; exit != 0 on any mismatch.
+          ./valid_corpus_runner check > check.out
+          echo "----- check.out -----"
+          cat check.out
+
+      - name: Run valid-corpus natively (emit mode, NOT emulated) -> raw reference output
+        run: |
+          set -euo pipefail
+          ./valid_corpus_runner emit > runner-raw.reference.txt
+          N="$(wc -l < runner-raw.reference.txt)"
+          echo "runner emitted ${N} line(s) (expect 54)"
+          [ "${N}" -eq 54 ] || { echo "REJECTED: expected 54 lines, got ${N}." >&2; exit 1; }
+          echo "----- runner-raw.reference.txt -----"
+          cat runner-raw.reference.txt
+
+      - name: Build engine provenance JSON
+        run: |
+          set -euo pipefail
+          python3 - > engine.json <<'PY'
+          import json, os, subprocess
+          def sh(c):
+              try:
+                  return subprocess.check_output(c, shell=True, text=True).strip()
+              except Exception:
+                  return ""
+          print(json.dumps({
+              "arm64_profile": sh("lscpu | sed -n '1,20p'")[:1500] or "aarch64",
+              "uname_m": sh("uname -m"),
+              "uname_a": sh("uname -a"),
+              "virt": sh("systemd-detect-virt") or "none",
+              "runner_sha256": os.environ.get("RUNNER_SHA", ""),
+              "cc_version": os.environ.get("CC_VERSION", "") or sh("cc --version | head -n1"),
+              "reference_source": "github-actions ubuntu-24.04-arm (standard hosted runner)",
+          }))
+          PY
+          echo "----- engine.json -----"
+          cat engine.json
+
+      - name: Collect reference result bundle (never seeded)
+        run: |
+          set -euo pipefail
+          python3 harness-valid/collect_results.py \
+            --manifest harness-valid/valid-corpus-manifest.json \
+            --raw runner-raw.reference.txt \
+            --side reference \
+            --engine-json "$(cat engine.json)" \
+            --out results-reference.json
+          echo "----- results-reference.json -----"
+          cat results-reference.json
+          echo "results-reference.json sha256: $(sha256sum results-reference.json | cut -d' ' -f1)"
+          echo "manifest sha256 (must equal SUT-side binding): $(sha256sum harness-valid/valid-corpus-manifest.json | cut -d' ' -f1)"
+
+      - name: Upload reference bundle + shared static binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-valid-corpus-reference-bundle
+          path: |
+            results-reference.json
+            runner-raw.reference.txt
+            check.out
+            valid_corpus_runner
+            provenance.txt
+            engine.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish reference bundle into repo (reference-valid/) for offline differential
+        if: success()
+        run: |
+          set -euo pipefail
+          mkdir -p reference-valid
+          cp results-reference.json runner-raw.reference.txt check.out provenance.txt engine.json reference-valid/
+          base64 -w0 valid_corpus_runner > reference-valid/valid_corpus_runner.b64
+          sha256sum valid_corpus_runner | cut -d' ' -f1 > reference-valid/valid_corpus_runner.sha256
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f reference-valid/
+          if git diff --cached --quiet; then
+            echo "no reference changes to commit"
+          else
+            git commit -m "valid-corpus reference bundle: native ubuntu-24.04-arm run [skip ci]"
+            git push
+          fi
