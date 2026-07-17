@@ -1,0 +1,103 @@
+name: ARM64 alignment litmus (misaligned exclusive)
+
+# generic-arm64-engine — AMD-PREVIEW. Co-tags: ENDURANCE-DEFERRED · NOT-ENDURANCE-QUALIFIED ·
+# DUAL-HOST-NOT-QUALIFIED · INTEL-DEFERRED · SINGLE-AMD-UARCH (Zen 4 / Ryzen 7 7800X3D).
+#
+# Genuine-silicon oracle for the misaligned-exclusive-load architectural requirement.
+# A misaligned exclusive load (LDXR at buf+1) is architecturally UNALIGNED regardless
+# of SCTLR.A and MUST raise an Alignment fault (SIGBUS/BUS_ADRALN). This workflow
+# compiles and runs the litmus NATIVELY on genuine ARM64 silicon and asserts the fault
+# is observed. It fails closed unless the runner is real aarch64 hardware (not qemu/tcg).
+#
+# This establishes the independent silicon oracle showing the ARCHITECTURE requires the
+# fault. A pinned qemu-system-aarch64 TCG build that returns "no_fault" on the same
+# litmus is therefore a documented TCG<->silicon divergence.
+#
+# Free on public repositories; standard hosted runner only. No secrets used or printed.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'litmus/**'
+      - '.github/workflows/arm64-alignment-litmus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  litmus:
+    name: Native ARM64 alignment litmus
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prove genuine ARM64 silicon (fail-closed if emulated)
+        run: |
+          set -euo pipefail
+          UM="$(uname -m)"
+          VIRT="$(systemd-detect-virt || true)"
+          echo "uname -m           : ${UM}"
+          echo "uname -a           : $(uname -a)"
+          echo "systemd-detect-virt: ${VIRT:-<none>}"
+          if [ "${UM}" != "aarch64" ]; then
+            echo "REJECTED: uname -m is '${UM}', not aarch64 -- not a valid ARM64 oracle." >&2
+            exit 1
+          fi
+          case "${VIRT}" in
+            qemu|tcg)
+              echo "REJECTED: systemd-detect-virt='${VIRT}' -- emulated, not an independent oracle." >&2
+              exit 1 ;;
+          esac
+          {
+            echo "uname_m=${UM}"
+            echo "uname_a=$(uname -a)"
+            echo "systemd_detect_virt=${VIRT:-none}"
+            echo "--- /proc/cpuinfo identity ---"
+            grep -E 'CPU implementer|CPU part|CPU architecture|Features' /proc/cpuinfo | sort -u || true
+          } > litmus-provenance.txt
+          cat litmus-provenance.txt
+
+      - name: Compile alignment litmus (native aarch64)
+        run: |
+          set -euo pipefail
+          cc -O2 -std=c11 -Wall -Wextra -o align_exclusive_litmus litmus/align_exclusive_litmus.c
+          file align_exclusive_litmus | grep -q 'ARM aarch64' \
+            || { echo "REJECTED: litmus is not an aarch64 ELF." >&2; exit 1; }
+
+      - name: Run litmus natively -> assert alignment fault observed
+        run: |
+          set -euo pipefail
+          # Exits 0 only if signal=SIGBUS;si_code=BUS_ADRALN is observed on real silicon.
+          ./align_exclusive_litmus | tee litmus-result.txt
+          grep -q 'signal=SIGBUS si_code=BUS_ADRALN' litmus-result.txt \
+            || { echo "REJECTED: expected SIGBUS/BUS_ADRALN on genuine silicon." >&2; exit 1; }
+
+      - name: Upload litmus evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-alignment-litmus
+          path: |
+            litmus-result.txt
+            litmus-provenance.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish litmus evidence into repo (litmus/results/)
+        if: success()
+        run: |
+          set -euo pipefail
+          mkdir -p litmus/results
+          cp litmus-result.txt litmus-provenance.txt litmus/results/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f litmus/results/
+          if git diff --cached --quiet; then
+            echo "no litmus changes to commit"
+          else
+            git commit -m "alignment litmus evidence: native ubuntu-24.04-arm run [skip ci]"
+            git push
+          fi

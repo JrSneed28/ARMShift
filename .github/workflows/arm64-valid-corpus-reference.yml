@@ -1,18 +1,24 @@
 name: ARM64 valid-corpus reference (54-entry)
 
-# Produces the INDEPENDENT semantic reference for the 54-entry (53 required + 1 seeded
-# negative control) ARM64 architecture corpus, compiled and run NATIVELY on genuine
-# ARM64 silicon (GitHub-hosted ubuntu-24.04-arm). This side is the oracle. It must never
-# be emulated -- the job fails closed if the runner is not real aarch64 hardware, or if
-# it is a qemu/tcg emulation. The system-under-test side (a pinned qemu-system-aarch64
-# TCG build) is produced separately, off this runner, and diffed against this bundle.
+# generic-arm64-engine — AMD-PREVIEW. Co-tags: ENDURANCE-DEFERRED · NOT-ENDURANCE-QUALIFIED ·
+# DUAL-HOST-NOT-QUALIFIED · INTEL-DEFERRED · SINGLE-AMD-UARCH (Zen 4 / Ryzen 7 7800X3D).
+#
+# Produces the INDEPENDENT semantic reference for the extended 54-entry (53 required +
+# 1 seeded negative control) ARM64 architecture corpus, compiled and run NATIVELY on
+# genuine ARM64 silicon (GitHub-hosted ubuntu-24.04-arm). This side is the oracle. It
+# must never be emulated -- the job fails closed if the runner is not real aarch64
+# hardware, or if it is a qemu/tcg emulation. The system-under-test side (a pinned
+# qemu-system-aarch64 TCG build) is produced separately, off this runner, and diffed
+# against this bundle.
 #
 # Free on public repositories; uses only GitHub standard hosted runners. No third-party
 # cloud (AWS/Azure/GCP) is provisioned. No secrets are used or printed.
 #
-# The reference result set binds to sha256(harness-valid/valid-corpus-manifest.json).
-# The SUT result set must be collected against the same manifest bytes so both sides
-# carry an identical corpus_manifest_sha256; diff_corpus.py fails closed otherwise.
+# SHA-BINDING NOTE: the reference result set binds to
+# sha256(harness-valid/valid-corpus-manifest.json). The manifest here is published
+# byte-identical to its authoritative source, so its sha256 (32420546...) matches the
+# SUT-side binding that diff_corpus.py enforces. Do not mutate the manifest bytes
+# without re-collecting the SUT-side reference set against the new sha256.
 
 on:
   push:
@@ -81,12 +87,6 @@ jobs:
           echo "valid_corpus_runner sha256: ${RUNNER_SHA}"
           echo "runner_sha256=${RUNNER_SHA}" >> provenance.txt
           echo "RUNNER_SHA=${RUNNER_SHA}" >> "$GITHUB_ENV"
-          # Record the reference compiler for parity with the SUT toolchain (Alpine gcc 15.2.0).
-          # sed -n '1p' (not head) drains the whole stream so cc never gets SIGPIPE under pipefail.
-          CC_VERSION="$(cc --version 2>&1 | sed -n '1p')"
-          echo "cc_version: ${CC_VERSION}"
-          echo "cc_version=${CC_VERSION}" >> provenance.txt
-          echo "CC_VERSION=${CC_VERSION}" >> "$GITHUB_ENV"
 
       - name: check-mode self-check on genuine silicon (arch oracle)
         run: |
@@ -124,7 +124,6 @@ jobs:
               "uname_a": sh("uname -a"),
               "virt": sh("systemd-detect-virt") or "none",
               "runner_sha256": os.environ.get("RUNNER_SHA", ""),
-              "cc_version": os.environ.get("CC_VERSION", "") or sh("cc --version | head -n1"),
               "reference_source": "github-actions ubuntu-24.04-arm (standard hosted runner)",
           }))
           PY

@@ -1,15 +1,16 @@
 /*
  * valid_corpus_runner.c -- WA.2 translation-validation runner (five families).
  *
- * PROVISIONAL · AMD-ONLY · NOT GATE EVIDENCE.  Authorized by AUTH-0006
- * (ADR-0020; amendment AMD-0002; 2026-07-11).  Ladder states 1-2 only.
+ * PROVISIONAL · AMD-ONLY · NOT GATE EVIDENCE.
+ * AMD-PREVIEW co-tags: ENDURANCE-DEFERRED · NOT-ENDURANCE-QUALIFIED ·
+ * DUAL-HOST-NOT-QUALIFIED · INTEL-DEFERRED · SINGLE-AMD-UARCH (Zen 4 / Ryzen 7 7800X3D).
  *
- * SCOPE: generic ARM64 only (generic-arm64-engine).  No Apple machine profile,
- * Apple-specific source/config, macOS guest, or Apple input (prohibitions P1-P7).
- * No public use of the AppleVirt name (P7).
+ * SCOPE: generic ARM64 only (generic-arm64-engine).  This harness targets the generic
+ * AArch64 architecture exclusively; it carries no platform-specific machine profile,
+ * guest-OS-specific source/config, or platform-specific guest input.
  *
  * This NEW file EXTENDS the W0.4 harness; it does not edit tools/diff/* (frozen,
- * byte-identical to public ARMShift under AUTH-0005).  It executes the WA.2 required
+ * byte-identical to public ARMShift).  It executes the WA.2 required
  * set defined in translation-validation-manifest.json / valid-corpus-manifest.json
  * across integer, branch/exception, FP/SIMD, atomics/exclusives, and architected
  * system-register cases.
